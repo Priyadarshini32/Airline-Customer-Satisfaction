@@ -1,0 +1,344 @@
+<template>
+  <div class="dashboard-container">
+    <div class="dashboard-form elevation-10">
+      <h2>Airline Passenger Satisfaction Form</h2>
+
+      <div v-if="authStore.isLoggedIn" class="satisfaction-form pa-8">
+        <div v-if="step === 1" class="form-step">
+          <div class="pb-3"><h3>Step 1: Provide your details</h3></div>
+          <div class="form-group">
+            <label for="Gender">Gender</label>
+            <select id="Gender" v-model="formData.Gender" required>
+              <option value="">Select</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="Customer Type">Customer Type</label>
+            <select
+              id="Customer Type"
+              v-model="formData['Customer Type']"
+              required
+            >
+              <option value="">Select</option>
+              <option value="Loyal Customer">Loyal Customer</option>
+              <option value="Disloyal Customer">Disloyal Customer</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="Age">Age</label>
+            <input
+              type="number"
+              id="Age"
+              v-model="formData.Age"
+              required
+              min="0"
+              max="120"
+            />
+          </div>
+          <div class="form-group">
+            <label for="Type of Travel">Type of Travel</label>
+            <select
+              id="Type of Travel"
+              v-model="formData['Type of Travel']"
+              required
+            >
+              <option value="">Select</option>
+              <option value="Business travel">Business Travel</option>
+              <option value="Personal Travel">Personal Travel</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="Class">Class</label>
+            <select id="Class" v-model="formData.Class" required>
+              <option value="">Select</option>
+              <option value="Eco">Economy</option>
+              <option value="Eco Plus">Economy Plus</option>
+              <option value="Business">Business</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="Flight Distance">Flight Distance</label>
+            <input
+              type="number"
+              id="Flight Distance"
+              v-model="formData['Flight Distance']"
+              required
+              min="0"
+            />
+          </div>
+          <button @click="nextStep" class="next-btn">Next</button>
+        </div>
+
+        <div v-if="step === 2" class="form-step">
+          <div class="pb-3"><h3>Step 2: Service Ratings</h3></div>
+          <div
+            class="form-group"
+            v-for="feature in authStore.ratingFeatures"
+            :key="feature"
+          >
+            <label :for="feature">{{ feature }}</label>
+            <select :id="feature" v-model="formData[feature]" required>
+              <option value="">Select Rating</option>
+              <option v-for="n in 5" :key="n" :value="n">{{ n }}</option>
+            </select>
+          </div>
+          <div class="d-flex justify-space-between">
+            <button @click="prevStep" class="next-btn">Back</button>
+
+            <button @click="predictSatisfaction" class="submit-btn">
+              Predict Satisfaction
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="auth-warning">
+        <h3>Please log in to access the prediction form.</h3>
+      </div>
+
+      <div v-if="showDialog" class="dialog-box">
+        <h3>Prediction Result:</h3>
+        <p>Predicted Satisfaction: {{ authStore.prediction }}</p>
+        <p v-if="authStore.accuracy !== null">
+          <strong>Accuracy:</strong>
+          {{ (authStore.accuracy * 100).toFixed(1) }}%
+        </p>
+        <div v-if="authStore.debugInfo" class="debug-info">
+          <p>
+            <strong>Features Used:</strong>
+            {{ authStore.debugInfo.features_used }}
+          </p>
+        </div>
+        <button @click="showDialog = false" class="next-btn">Close</button>
+      </div>
+
+      <div v-if="authStore.errorMessage" class="error-message">
+        {{ authStore.errorMessage }}
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from "vue";
+import { useAuthStore } from "@/stores/store";
+
+const authStore = useAuthStore();
+const step = ref(1);
+const showDialog = ref(false);
+
+const formData = ref({
+  Gender: "",
+  "Customer Type": "",
+  Age: "",
+  "Type of Travel": "",
+  Class: "",
+  "Flight Distance": "",
+});
+
+onMounted(async () => {
+  await authStore.fetchSelectedFeatures();
+  authStore.ratingFeatures.forEach((feature) => {
+    formData.value[feature] = "";
+  });
+});
+
+const nextStep = () => {
+  step.value = 2;
+};
+
+const prevStep = () => {
+  step.value = 1;
+};
+
+const predictSatisfaction = async () => {
+  if (!authStore.isLoggedIn) {
+    authStore.errorMessage = "Please log in to use this feature.";
+    return;
+  }
+
+  const hasEmptyFields = Object.values(formData.value).some(
+    (value) => value === ""
+  );
+  if (hasEmptyFields) {
+    authStore.errorMessage = "Please fill out all required fields.";
+    return;
+  }
+
+  authStore.errorMessage = null;
+  await authStore.fetchPrediction(formData.value);
+  showDialog.value = true;
+};
+</script>
+
+<style scoped>
+.dashboard-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 87%;
+  font-family: "Trebuchet MS", "Lucida Sans Unicode", "Lucida Grande",
+    "Lucida Sans", Arial, sans-serif;
+  font-weight: bold;
+  margin-left: 7%;
+  margin-top: 1.5%;
+  color: rgb(48, 47, 47);
+}
+
+.dashboard-form {
+  width: 800px;
+
+  padding: 10px;
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.form-group {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  position: relative;
+  padding-bottom: 10px;
+}
+
+.form-group label {
+  flex-basis: 30%;
+  text-align: center;
+  margin-right: 10px;
+  font-weight: bold;
+  color: #555;
+  font-size: large;
+}
+
+.form-group select,
+.form-group input {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 16px;
+  background-color: #f9f9f9;
+  transition: border-color 0.3s ease;
+}
+
+.form-group select:focus,
+.form-group input:focus {
+  outline: none;
+  border-color: #42b983;
+  background-color: #fff;
+}
+
+.submit-btn {
+  background-color: #42b983;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 17px;
+  transition: background-color 0.3s ease;
+  padding: 10px;
+  width: 40%;
+}
+
+.next-btn {
+  background-color: #828c87;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 17px;
+  transition: background-color 0.3s ease;
+  padding: 10px;
+  width: 30%;
+}
+.next-btn:hover {
+  background-color: #8840ba;
+}
+.submit-btn:hover {
+  background-color: #35495e;
+}
+
+.error-message {
+  color: red;
+  font-size: 14px;
+}
+
+.dialog-box {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+.auth-warning {
+  font-size: 18px;
+  color: #35495e;
+}
+</style>
+
+
+
+
+
+# Define a new model for storing predictions and form data
+class Prediction(db.Model):
+    __tablename__ = 'Predictions'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(256), nullable=False)
+    form_data = db.Column(db.JSON, nullable=False)
+    prediction = db.Column(db.String(256), nullable=False)
+
+
+
+# Endpoint to store prediction results
+@app.route('/store_prediction', methods=['POST'])
+def store_prediction():
+    data = request.get_json()
+    username = data.get('username')
+    form_data = data.get('form_data')
+    prediction = data.get('prediction')
+  
+
+    if not username or not form_data or not prediction:
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    new_prediction = Prediction(
+        username=username,
+        form_data=form_data,
+        prediction=prediction,
+  
+    )
+
+    db.session.add(new_prediction)
+    db.session.commit()
+
+    return jsonify({'message': 'Prediction stored successfully'}), 201
+
+# Endpoint to get all predictions for a user
+@app.route('/get_predictions', methods=['GET'])
+def get_predictions():
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+
+    predictions = Prediction.query.filter_by(username=username).all()
+    result = [{
+        'form_data': pred.form_data,
+        'prediction': pred.prediction,
+        'timestamp': pred.timestamp
+    } for pred in predictions]
+
+    return jsonify(result), 200
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
