@@ -129,76 +129,79 @@ def predict():
     if model is None:
         return jsonify({'error': 'Model loading failed'}), 500
 
-    # Extract the static and additional selected features from the model
+    # Extract model components
     selected_rating_features = model.get('selected_rating_features', None)
     static_features = model.get('static_features', None)
     label_encoders = model.get('label_encoders', {})
     scaler = model.get('scaler', None)
+    weights = model.get('weights', None)
 
-    if selected_rating_features is None or static_features is None:
-        return jsonify({'error': 'Feature lists missing in model'}), 500
+    if not (selected_rating_features and static_features and scaler and isinstance(weights, np.ndarray)):
+        return jsonify({'error': 'Missing model components'}), 500
 
-    if scaler is None:
-        return jsonify({'error': 'Scaler not found in model'}), 500
-
-    # Combine static and selected features (total 16 features)
+    # Combine all required features
     required_features = static_features + selected_rating_features
 
-    # Log the features the model expects to use for prediction
-    logging.info(f"Required features: {required_features}")
-
-    # Prepare input dictionary, skip features not in the request data
+    # Prepare input dictionary
     feature_values_dict = {}
     missing_features = []
 
     for feature in required_features:
         feature_value = data.get(feature)
-        if feature_value is not None:  # Only include features that are present in the input data
+        if feature_value is not None:
             if isinstance(feature_value, (int, float)):
                 feature_values_dict[feature] = float(feature_value)
             elif isinstance(feature_value, str) and feature in label_encoders:
                 try:
                     feature_values_dict[feature] = label_encoders[feature].transform([feature_value])[0]
                 except Exception as e:
-                    logging.error(f"Label encoding failed for feature {feature}: {str(e)}")
+                    logging.error(f"Label encoding failed for {feature}: {str(e)}")
         else:
             missing_features.append(feature)
 
-    # Log missing features
     if missing_features:
-        logging.error("Missing features in input data: %s", missing_features)
+        return jsonify({'error': f"Missing features: {missing_features}"}), 400
 
-    # If no valid features were provided in the request or none of the selected features are available, return an error
     if not feature_values_dict:
-        return jsonify({'error': 'No valid features provided or features not selected for training'}), 400
+        return jsonify({'error': 'No valid features provided'}), 400
 
-    # Convert to DataFrame
+    # Convert input dictionary to DataFrame
     input_df = pd.DataFrame([feature_values_dict])
 
-    # Scale the input using the same scaler from training
+    # Extract all features (static + rating) and log their counts
+    all_features_data = input_df[required_features].values
+    logging.info(f"Static Features: {len(static_features)}, Selected Rating Features: {len(selected_rating_features)}")
+    logging.info(f"Total Features in Data: {all_features_data.shape[1]} (Expected: 16)")
+
+    # Check if the scaler is trained on the correct number of features
+    if all_features_data.shape[1] != 16:
+        return jsonify({'error': f"Feature count mismatch: Expected 16, but got {all_features_data.shape[1]}"}), 400
+
+    # Scale all features
     try:
-        X_scaled = scaler.transform(input_df)
+        all_features_scaled = scaler.transform(all_features_data)
     except ValueError as e:
         return jsonify({'error': f"Scaler transformation failed: {str(e)}"}), 400
 
-    # Log the shape of the scaled input
-    logging.info(f"Scaled input shape: {X_scaled.shape}")
+    # Ensure that the scaled features match the model's expected size
+    if all_features_scaled.shape[1] != len(weights):
+        logging.error(f"Feature mismatch: Model expects {len(weights)}, got {all_features_scaled.shape[1]}")
+        return jsonify({'error': 'Feature size mismatch'}), 400
 
-    # Ensure the size of X_scaled matches the number of features in the model
-    if X_scaled.shape[1] != len(model['weights']):
-        # Log the model's weights and the input features for debugging
-        logging.error(f"Model weights shape: {len(model['weights'])}")
-        logging.error(f"Input features shape: {X_scaled.shape}")
-        
-        # Check if the model is using 16 features (6 static + 10 selected features)
-        if len(model['weights']) != 16:
-            return jsonify({'error': 'Model weights do not match the required 16 features'}), 400
-        
-        return jsonify({'error': 'Feature size mismatch between input and model weights'}), 400
+    # Use scaled features for prediction
+    X_final = all_features_scaled
+
+
+    # Log feature shapes
+    logging.info(f"Scaled input shape: {X_final.shape}")
+
+    if X_final.shape[1] != len(weights):
+        logging.error(f"Feature mismatch: Model expects {len(weights)}, got {X_final.shape[1]}")
+        return jsonify({'error': 'Feature size mismatch'}), 400
 
     # Encrypt and predict
     context = initialize_tenseal_context()
-    prediction = predict_encrypted(X_scaled[0], model, context)
+    prediction = predict_encrypted(X_final[0], model, context)
 
     true_label = data.get("true_label")
     accuracy = calculate_accuracy(prediction, true_label) if true_label is not None else None
@@ -209,14 +212,13 @@ def predict():
         'accuracy': accuracy if accuracy is not None else None,
         'debug_info': {
             'input_shape': input_df.shape,
-            'scaled_shape': X_scaled.shape,
+            'scaled_shape': X_final.shape,
             'features_used': len(feature_values_dict),
             'feature_names': list(feature_values_dict.keys()),
             'feature_values': [float(val) for val in feature_values_dict.values()],
             'missing_features': missing_features
         }
     })
-
 
 from datetime import datetime
 

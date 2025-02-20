@@ -16,7 +16,7 @@
             <router-link to="/dashboard">Dashboard</router-link>
           </li>
           <li v-if="isLoggedIn">
-            <router-link to="/prediction">Prediction</router-link>
+            <router-link to="/prediction">History</router-link>
           </li>
           <li v-if="isLoggedIn">
             <button @click="handleLogout" class="logout-btn">Logout</button>

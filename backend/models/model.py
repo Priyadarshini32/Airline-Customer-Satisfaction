@@ -16,6 +16,7 @@ def initialize_weights(n_features):
     weights = np.zeros(n_features)
     bias = 0
     return weights, bias
+
 def train_logistic_regression(X, y, learning_rate=0.01, iterations=10):
     n_features = X.shape[1]  # Get the number of features dynamically
     print(f"Training Logistic Regression with {n_features} features.")  # Debugging output
@@ -36,7 +37,6 @@ def train_logistic_regression(X, y, learning_rate=0.01, iterations=10):
 
     return weights, bias
 
-
 def predict_encrypted(X_enc, weights, bias):
     predictions = []
     for x_enc in X_enc:
@@ -47,21 +47,20 @@ def predict_encrypted(X_enc, weights, bias):
         predictions.append(1 if y_pred_enc[0] > 0.5 else 0)
     return predictions
 
-def load_and_preprocess_data(file_path, k_features=10, fixed_selected_features=None, is_train=True):
+def load_and_preprocess_data(file_path, k_features=10, fixed_selected_features=None, is_train=True, scaler=None):
     df = pd.read_csv(file_path).head(5000)
 
-    # Define features
+    # Define static & rating features
     static_features = ['Gender', 'Customer Type', 'Age', 'Type of Travel', 'Class', 'Flight Distance']
     rating_features = [
-        'Inflight wifi service', 'Ease of Online booking',
-        'Online boarding', 'Seat comfort', 'Inflight entertainment',
-        'On-board service', 'Leg room service', 'Baggage handling',
-        'Inflight service', 'Cleanliness'
+        'Inflight wifi service', 'Departure/Arrival time convenient', 'Ease of Online booking',
+        'Gate location', 'Food and drink', 'Online boarding', 'Seat comfort',
+        'Inflight entertainment', 'On-board service', 'Leg room service',
+        'Baggage handling', 'Checkin service', 'Inflight service', 'Cleanliness'
     ]
 
-    # Combine all potential features
-    features = static_features + rating_features
-    X = df[features]
+    # Select relevant features
+    X = df[static_features + rating_features]
     y = df['satisfaction'].apply(lambda x: 1 if x == 'satisfied' else 0)
 
     # Encode categorical features
@@ -73,28 +72,33 @@ def load_and_preprocess_data(file_path, k_features=10, fixed_selected_features=N
         X[col] = le.fit_transform(X[col])
         label_encoders[col] = le
 
-    # Standardize features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    # Feature selection for rating features only
+    # Feature selection for rating features only (during training)
     if is_train:
         selector = SelectKBest(score_func=mutual_info_classif, k=k_features)
-        X_selected_rating = selector.fit_transform(X_scaled[:, len(static_features):], y)
+        X_selected_rating = selector.fit_transform(X[rating_features], y)
         selected_rating_features = [rating_features[i] for i in selector.get_support(indices=True)]
     else:
-        df_rating = pd.DataFrame(X_scaled[:, len(static_features):], columns=rating_features)
-        X_selected_rating = df_rating[fixed_selected_features].values
+        X_selected_rating = X[fixed_selected_features].values  # Use same selected features from training
         selected_rating_features = fixed_selected_features
 
-    # Combine static features with selected rating features
-    X_selected = np.hstack((X_scaled[:, :len(static_features)], X_selected_rating))  # Ensure static features are included
+    # **Ensure Static Features Are Always Included**
+    X_selected = np.hstack((X[static_features].values, X_selected_rating))  # Static + Selected Ratings
+
+    # **Standardize Only the Selected Features**
+    if is_train:
+        scaler = StandardScaler()  # Fit new scaler
+        X_selected_scaled = scaler.fit_transform(X_selected)
+    else:
+        if scaler is None:
+            raise ValueError("Scaler must be provided for testing data!")
+        X_selected_scaled = scaler.transform(X_selected)
 
     selected_features = static_features + selected_rating_features  # Keep track of selected features
 
-    print(f"Final Feature Count: {X_selected.shape[1]}")  # Debugging: Should print 16
+    print(f"Final Feature Count: {X_selected_scaled.shape[1]}")  # Debugging: Should print `len(static_features) + k_features`
+    print(f"Selected Rating Features: {selected_rating_features}")  # Debugging output
 
-    return X_selected, y.values, scaler, label_encoders, selected_rating_features, static_features, selected_features
+    return X_selected_scaled, y.values, scaler, label_encoders, selected_rating_features, static_features, selected_features
 
 
 def encrypt_data(context, data):
@@ -115,7 +119,9 @@ def save_model(weights, bias, scaler, label_encoders, selected_rating_features, 
 def main():
     # Load and preprocess training data
     X_train, y_train, scaler, label_encoders, selected_rating_features, static_features, selected_features = load_and_preprocess_data(
-        'C:/Users/priya/OneDrive/Documents/sem 8/DPSA LAB/CAT 1/data/train.csv', k_features=10, is_train=True
+        'C:/Users/priya/OneDrive/Documents/sem 8/DPSA LAB/CAT 1/data/train.csv', 
+        k_features=10, 
+        is_train=True
     )
 
     # Train logistic regression model
@@ -124,12 +130,13 @@ def main():
     # Save the model
     save_model(weights, bias, scaler, label_encoders, selected_rating_features, static_features)
 
-    # Load and preprocess test data using the SAME selected features
+    # Load and preprocess test data using the SAME selected features and scaler
     X_test, y_test, _, _, _, _, _ = load_and_preprocess_data(
         'C:/Users/priya/OneDrive/Documents/sem 8/DPSA LAB/CAT 1/data/test.csv',
         k_features=10,
         fixed_selected_features=selected_rating_features,
-        is_train=False
+        is_train=False,
+        scaler=scaler 
     )
 
     print("Preprocessed Test Data")
@@ -142,6 +149,11 @@ def main():
 
     # Encrypt the test data
     X_test_encrypted = encrypt_data(context, X_test)
+
+    # Print the first five encrypted feature vectors
+    print("First five encrypted feature vectors:")
+    for i in range(5):
+        print(X_test_encrypted[i])
 
     # Predict the results
     y_pred_encrypted = predict_encrypted(X_test_encrypted, weights, bias)
